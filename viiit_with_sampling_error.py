@@ -7,10 +7,16 @@ Created on Mon Apr 26 11:41:04 2021
 """
 
 import numpy as np
-#import double_redundancy_mmi
 import scipy.linalg as la
 from matplotlib import pyplot as plt
+from double_redundancy_mmi import double_redundancy_mmi
+import os
 
+
+
+
+path_out1 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results'
+path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/plots'
 
 # parameters to loop over
 all_rho = np.array([-0.9, -0.7, -0.5, -0.3,                                     # correlation coefficients
@@ -114,6 +120,8 @@ for i in range(len(all_rho)):                                                   
             # calculate phi & phiR
             phi = np.zeros(T)
             phiR = np.zeros(T)
+           
+            #breakpoint()
             
             for n in range(time_lag,T):                                                   # loop over time-points
                 try:
@@ -122,8 +130,9 @@ for i in range(len(all_rho)):                                                   
                         
                     phiR[n] = 0.5*np.log(np.linalg.det(Sx0[:,:,n-time_lag])/((np.linalg.det(Sx1_conditional[:,:,n]))+0j)\
                             /(Sx0[0,0,n-time_lag]/(Sx1_conditional[0,0,n]+0j)) / (Sx0[1,1,n-time_lag]/(Sx1_conditional[1,1,n]+0j))) + all_rho_errvar_timelags_double_red[i,j,k,n]
-                except: 
+                except: #RuntimeWarning
                     pass
+                    
         
             all_rho_errvar_timelags_phi[i,j,k,:] = phi
             all_rho_errvar_timelags_phiR[i,j,k,:] = phiR
@@ -132,10 +141,10 @@ for i in range(len(all_rho)):                                                   
             
             print(i)
    
-np.save('all_rho_errvar_timelags_kldiv.npy', all_rho_errvar_timelags_kl_div)
-np.save('all_rho_errvar_timelags_phiR.npy', all_rho_errvar_timelags_phiR)
-np.save('all_rho_errvar_timelags_phi.npy', all_rho_errvar_timelags_phi) 
-np.save('all_rho_errvar_timelags_double_red.npy', all_rho_errvar_timelags_double_red)
+np.save(os.path.join(path_out1, 'all_rho_errvar_timelags_kldiv.npy'), all_rho_errvar_timelags_kl_div)
+np.save(os.path.join(path_out1, 'all_rho_errvar_timelags_phiR.npy'), all_rho_errvar_timelags_phiR)
+np.save(os.path.join(path_out1, 'all_rho_errvar_timelags_phi.npy'), all_rho_errvar_timelags_phi) 
+np.save(os.path.join(path_out1, 'all_rho_errvar_timelags_double_red.npy'), all_rho_errvar_timelags_double_red)
         
 #%% plotting
 
@@ -192,7 +201,7 @@ for i in range(len(all_rho)):
         
     plt.subplots_adjust(hspace=0.5, wspace=0.4)
         
-    fig.savefig('all_errvar_phi_rho'+
+    fig.savefig(path_out2 + '/' + 'all_errvar_phi_rho'+
                 str(all_rho[i]).replace('.', '')+'.png', dpi=300,
                 bbox_inches='tight')  
     
@@ -274,7 +283,7 @@ for j in range(len(all_errvar)):
         
     plt.subplots_adjust(hspace=0.5, wspace=0.4)
         
-    fig.savefig('all_phi_doublered_phiR_rho_errvar'+
+    fig.savefig(path_out2 + '/' + 'all_phi_doublered_phiR_kldiv_rho_errvar'+
                 str(all_errvar[j]).replace('.', '')+'.png', dpi=300,
                 bbox_inches='tight')  
     
