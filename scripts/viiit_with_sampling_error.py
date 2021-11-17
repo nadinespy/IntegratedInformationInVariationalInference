@@ -18,14 +18,14 @@ from itertools import product
 main_path = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/scripts'
 os.chdir(main_path)
 
-from double_redundancy_mmi import double_redundancy_mmi
+import iit_in_vi as iv
 
 oc.addpath(main_path)
 oc.javaaddpath(main_path+'/infodynamics.jar')
 oc.eval('pkg load statistics')
     
-path_out1 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results'
-path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/plots'
+path_out1 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/analyses/'
+path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/plots/'
 
 #%%
 
@@ -39,9 +39,9 @@ path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_som
 #         0.3, 0.5, 0.7, 1.0, 1.2]            
 
 
-all_rho = np.array([0.5, 0.3])                                     
+all_rho = np.array([0.5])                                     
 all_errvar = np.array([0.01])
-all_timelags = np.array([1])
+all_timelags = np.array([10])
 
                             
 # other parameters
@@ -52,23 +52,16 @@ mu = np.array([1,-1])
 T = 2000
 dt = 0.01                                                                       # integration step
 mx = np.zeros((2,T))                                                            # mean vector of variational parameters
-mx[:,0] = np.random.rand(2)               
-                                      # initial mean at t=0
+mx[:,0] = np.random.rand(2)                                                     # initial random values for mean variational parameters at t = 1 
+initial_mx = mx[:,0]         
 
 print('initial mean at t = 0: ', mx)
 
 
-# n_jobs = 8
-# all_varParams_tmp = Parallel(n_jobs=n_jobs)(delayed(run_many_chains)(partial(target_distr, corr = corr), varParams, D=D, num_iters_VI = num_iters_VI_a, num_samples = 2000, 
-#                             callback_function = callback_no_plot, optimizer = optimizer, num_iters_GD = num_iters_GD, 
-#                             step_size = step_size) for i in range(num_iters_VI_b))
-
-# Parallel(n_jobs=1)(delayed(sqrt)(i**2) for i in range(10))
-
 def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
     """docstring"""
     
-    super_df = []
+    df = []
     
     S = np.zeros((2,2))                                                         # covariance of reference distribution
     S[0,0] = 1
@@ -81,11 +74,11 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
     B = np.diag(A)                                                             
      
     
-    Sx0 = np.zeros((2,2,T))                                                 # same-time covariance matrix of variational parameters
-    Sx0[:,:,0] = np.eye(2)                                                  # initial covariance of parameters at t=0
-    Sx1 = np.zeros((2,2,T))                                                 # time-delayed (one unit) covariance matrix of variational parameters
+    Sx0 = np.zeros((2,2,T))                                                     # same-time covariance matrix of variational parameters
+    Sx0[:,:,0] = np.eye(2)  
+    initial_covariance = Sx0[:,:,0]                                             # initial covariance of parameters at t = 0
+    Sx1 = np.zeros((2,2,T))                                                     # time-delayed (one unit) covariance matrix of variational parameters
     
-    #time_lag = all_timelags[k]
     kldiv = np.zeros(T)
     
     # ----------------------------------------------------------------
@@ -93,14 +86,14 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
     # ----------------------------------------------------------------
     
     # time-lagged covariance matrices
-    for n in range(T):                                                      # loop over time-points 
+    for n in range(T):                                                          # loop over time-points 
         t = n * dt
-        mx[:,n] = (np.eye(2)-la.expm(-A * t)) @ mu + la.expm(-A * t) @ mx[:,0]
-        Sx0[:,:,n] = la.expm(-A * t) @ Sx0[:,:,0]  @ la.expm(-A.T * t)  + 0.5 * errvar**2 * la.inv(A)@(np.eye(2)- la.expm(-A * 2 * t))
+        mx[:,n] = iv.get_var_mean(A, t, mu, initial_mx)
+        Sx0[:,:,n] = iv.get_var_cov(A, t, errvar, initial_covariance)
     
         if n > time_lag:
             s = (n-time_lag) * dt
-            Sx1[:,:,n] = la.expm(-A * (t+s)) @ Sx0[:,:,0]  + 0.5 * errvar**2 * la.inv(A) @(la.expm(A * (s-t))- la.expm(A * (-t-s)))
+            Sx1[:,:,n] = iv.get_var_time_lagged_cov(A, t, s, errvar, initial_covariance)
     
     
     # conditional covariance matrices
@@ -112,19 +105,32 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
     
     for n in range(1+time_lag,T):                                                 # loop over time-points
         try:  
-            Sx1_conditional[:,:,n] = Sx0[:,:,n-1] - Sx1[:,:,n].T @ la.pinv(Sx0[:,:,n]) @ Sx1[:,:,n]         # get covariance of X_t-tau conditioned on X_t: \Sigma_(X(t-1),X(t-1)) - \Sigma(X(t-1),X(t)) * \Sigma(X(t),X(t))^(-1) * \Sigma(X(t),X(t-1))
-            Sx1_conditional_part11[n] = Sx0[0,0,n-1] - Sx1[0,0,n] * np.reciprocal(Sx0[0,0,n]) * Sx1[0,0,n]  # get variance of x1_t-tau conditioned on x1_t: \Sigma_(x1(t-tau),x1(t-tau)) - \Sigma_x1(t-tau)x1(t) * \Sigma_(x1(t),x1(t))^(-1) * \Sigma_x1(t)x1(t-tau)
-            Sx1_conditional_part22[n] = Sx0[1,1,n-1] - Sx1[1,1,n] * np.reciprocal(Sx0[1,1,n]) * Sx1[1,1,n]  # get variance of x2_t-tau conditioned on x2_t: \Sigma_(x2(t-tau),x2(t-tau)) - \Sigma_x2(t-tau)x2(t) * \Sigma_(x2(t),x2(t))^(-1) * \Sigma_x1(t)x2(t-tau)
-            Sx1_conditional_part12[n] = Sx0[0,0,n-1] - Sx1[1,0,n] * np.reciprocal(Sx0[1,1,n]) * Sx1[1,0,n]  # get variance of x1_t-tau conditioned on x2_t: \Sigma_(x1(t-tau),x1(t-tau)) - \Sigma_x1(t-tau)x2(t) * \Sigma_(x2(t),x2(t))^(-1) * \Sigma_x2(t)x1(t-tau)
-            Sx1_conditional_part21[n] = Sx0[1,1,n-1] - Sx1[0,1,n] * np.reciprocal(Sx0[0,0,n]) * Sx1[0,1,n]  # get variance of x2_t-tau conditioned on x1_t: \Sigma_(x2(t-tau),x2(t-tau)) - \Sigma_x2(t-tau)x1(t) * \Sigma_(x1(t),x1(t))^(-1) * \Sigma_x1(t)x2(t-tau)
+            var_cov_present = Sx0[:,:,n]
+            var_cov_past = Sx0[:,:,n-time_lag]
+            var_cov_present_parts11 = Sx0[0,0,n]
+            var_cov_past_parts11 = Sx0[0,0,n-time_lag]
+            var_cov_present_parts22 =  Sx0[1,1,n]
+            var_cov_past_parts22 = Sx0[1,1,n-time_lag]
+            
+            var_time_lagged_cov_present = Sx1[:,:,n]
+            var_time_lagged_cov_present_parts11 = Sx1[0,0,n]
+            var_time_lagged_cov_present_parts21 = Sx1[1,0,n]
+            var_time_lagged_cov_present_parts22 = Sx1[1,1,n]
+            var_time_lagged_cov_present_parts12 = Sx1[0,1,n]
+            
+            Sx1_conditional[:,:,n] = iv.get_var_cond_cov_full(var_cov_past, var_cov_present, var_time_lagged_cov_present) 
+            Sx1_conditional_part11[n] = iv.get_var_cond_cov_parts(var_cov_past_parts11, var_cov_present_parts11, var_time_lagged_cov_present_parts11)
+            Sx1_conditional_part22[n] = iv.get_var_cond_cov_parts(var_cov_past_parts22, var_cov_present_parts22, var_time_lagged_cov_present_parts22)        
+            Sx1_conditional_part12[n] = iv.get_var_cond_cov_parts(var_cov_past_parts11, var_cov_present_parts22, var_time_lagged_cov_present_parts21)
+            Sx1_conditional_part21[n] = iv.get_var_cond_cov_parts(var_cov_past_parts22, var_cov_present_parts11, var_time_lagged_cov_present_parts12)
         except:
             pass 
-        
+    
     # ----------------------------------------------------------------
     # CALCULATE DOUBLE-REDUNDANCY
     # ----------------------------------------------------------------
     
-    double_red = double_redundancy_mmi(Sx0, Sx1_conditional, Sx1_conditional_part11, Sx1_conditional_part22, Sx1_conditional_part12, Sx1_conditional_part21, time_lag)
+    double_red = iv.get_double_red_mmi(Sx0, Sx1_conditional, Sx1_conditional_part11, Sx1_conditional_part22, Sx1_conditional_part12, Sx1_conditional_part21, time_lag)
     
     # ----------------------------------------------------------------
     # CALCULATE PHI, PHI-R, KL-DIVERGENCE, & PHIID-BASED QUANTITIES
@@ -138,72 +144,39 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
         # KL DIVERGENCE
         # ----------------------------------------------------------------
         
-        kldiv = np.sum(0.5 * (1-np.log(2 * np.pi/B))) + 0.5 * np.log(2 * np.pi * np.linalg.det(np.linalg.inv(A))) + np.sum(0.5 * B * np.diag(A)) + 0.5 * (mx[:,n]-mu) @ A @ (mx[:,n]-mu) + 0.5 * np.sum(A * Sx0[:,:,n])
-        
+        variational_covariance = Sx0[:,:,n]
+        variational_mean = mx[:,n]
+        kldiv = iv.get_kl_div(A, B, mu, variational_mean, variational_covariance)
         
         # ----------------------------------------------------------------
         # PHI & PHI-R
         # ----------------------------------------------------------------
         
         try:                    
-            phi = (0.5 * np.log(np.linalg.det(Sx0[:,:,n-time_lag])/((np.linalg.det(Sx1_conditional[:,:,n]))+0j)\
-            /(Sx0[0,0,n-time_lag]/(Sx1_conditional[0,0,n]+0j)) / (Sx0[1,1,n-time_lag]/(Sx1_conditional[1,1,n]+0j)))).real
+            var_cov_past = Sx0[:,:,n-time_lag] 
+            var_cond_cov_present_full = Sx1_conditional[:,:,n] 
+            var_cov_past_parts11 = Sx0[0,0,n-time_lag] 
+            var_cond_cov_present_parts11 = Sx1_conditional[0,0,n]
+            var_cond_cov_past_parts22 = Sx0[1,1,n-time_lag]
+            var_cond_cov_present_parts22 = Sx1_conditional[1,1,n]
+            
+            phi = iv.get_phi(var_cov_past, var_cond_cov_present_full, var_cov_past_parts11, var_cond_cov_present_parts11, var_cond_cov_past_parts22, var_cond_cov_present_parts22)
                 
             phiR = phi + double_red[n]
             
         except: #RuntimeWarning
             phi = float('NaN')
             phiR = float('NaN')
-        
+
         # ----------------------------------------------------------------
         # PHIID BASED QUANTITIES
         # ----------------------------------------------------------------
         
         # simulate time-series with given covariance matrix
-        
         time_series = np.random.multivariate_normal(mx[:,n], Sx0[:,:,n], T).T
-        phiid = oc.PhiIDFull(time_series, time_lag, 'mmi')
+        phiid, emergence_capacity_phiid, downward_causation_phiid, synergy_phiid, transfer_phiid, phi_phiid, phiR_phiid = iv.get_phiid(time_series, time_lag, 'mmi')
         
-        phiid_dict = {'rtr': phiid.rtr, 'rtx': phiid.rtx, 'rty': phiid.rty, 'rts': phiid.rts, 'xtr': phiid.xtr, 'xtx': phiid.xtx, \
-                'xty': phiid.xty, 'xts': phiid.xts, 'ytr': phiid.ytr, 'ytx': phiid.ytx, 'yty': phiid.yty, 'yts': phiid.yts, \
-                'str': phiid.str, 'stx': phiid.stx, 'sty': phiid.sty, 'sts': phiid.sts}
-        
-        # -----------------------------------------------------------------------------
-        # calculate synergistic/emergent capacity, downward causation, 
-        # causal decoupling and store everything in nested dictionary
-        # -----------------------------------------------------------------------------
-        
-        # Syn(X_t;X_t-1) (synergistic capacity of the system) 
-        # Un (Vt;Xt'|Xt) (causal decoupling - the top term in the lattice) 
-        # Un(Vt;Xt'α|Xt) (downward causation) 
-        
-        # synergy (only considering the synergy that the sources have, not the target): 
-        # {12} --> {1}{2} + {12} --> {1} + {12} --> {2} + {12} --> {12} 
-         
-        # causal decoupling: {12} --> {12}
-        
-        # downward causation: 
-        # {12} --> {1}{2} + {12} --> {1} + {12} --> {2}
-        
-        # phi =     - {1}{2}-->{1}{2}                                                   (double-redundancy)
-        #           + {12}-->{12}                                                       (causal decoupling)
-        #           + {12}-->{1} + {12}-->{2} + {12}-->{1}{2}                           (downward causation)
-        #           + {1}{2}-->{12} + {1}-->{12} + {2}-->{12}                           (upward causation)
-        #           + {1}-->{2} + {2}-->{1}                                             (transfer)
-        
-        # synergy = causal decoupling + downward causation + upward causation
-        
-        
-        emergence_capacity_phiid = phiid_dict["str"] + phiid_dict["stx"] + phiid_dict["sty"] + phiid_dict["sts"]
-        downward_causation_phiid = phiid_dict["str"] + phiid_dict["stx"] + phiid_dict["sty"]
-        synergy_phiid = emergence_capacity_phiid + phiid_dict["rts"] + phiid_dict["xts"] + phiid_dict["yts"]
-        transfer_phiid = phiid_dict["xty"] + phiid_dict["ytx"]
-        phi_phiid = - phiid_dict["rtr"] + synergy_phiid + transfer_phiid
-        phiR_phiid = phi_phiid + phiid_dict["rtr"]
-        
-        
-        
-        super_df_temp = pd.DataFrame({'correlation': [rho], 'error_variance': [errvar], 'time_lag': [time_lag], 'time_point' : [n],
+        df_temp = pd.DataFrame({'correlation': [rho], 'error_variance': [errvar], 'time_lag': [time_lag], 'time_point' : [n],
                                  'phi': [phi], 'phiR': [phiR], 'kldiv': [kldiv], 'double_red': [double_red[n]], 'rtr': [phiid.rtr], 'rtx': [phiid.rtx], 
                                  'rty': [phiid.rty], 'rts': [phiid.rts], 'xtr': [phiid.xtr], 'xtx': [phiid.xtx], 'xty': [phiid.xty], 'xts': [phiid.xts], 
                                  'ytr': [phiid.ytr], 'ytx': [phiid.ytx], 'yty': [phiid.yty], 'yts': [phiid.yts], 'str': [phiid.str], 'stx': [phiid.stx], 
@@ -211,46 +184,44 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
                                  'emergence_capacity_phiid': [emergence_capacity_phiid], 'downward_causation_phiid': [downward_causation_phiid], 
                                  'phi_phiid': [phi_phiid], 'phiR_phiid': [phiR_phiid]})
         
-        super_df.append(super_df_temp)
+        df.append(df_temp)
         
-    return super_df   
+    return df   
 
 
-def concatenate_results_from_models(all_rho, all_errvar, all_timelags, T, dt, mx, mu):
-    super_result = []
-    #for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags):
-        #your_result = get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
+def phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt, mx, mu):
+    results_df = []
 
-    your_result = [get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
+    # storing each dataframe in a list
+    results = [get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
                                     for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags)]
-    
-    # with parallelization
-    # your_result = Parallel(n_jobs = 2)(delayed(get_results_from_model)(rho, errvar, time_lag, T, dt, mx, mu)
-    #                                 for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags))
-    
-    for dataframe in your_result:
+
+    # unpacking dataframes so that each row is not of type "list", but of type "dataframe"
+    for dataframe in results:
         unpack_dataframe = pd.concat(dataframe, ignore_index = True)
-        super_result.append(unpack_dataframe)
+        results_df.append(unpack_dataframe)
     
-    super_result = pd.concat(super_result, ignore_index = True)
+    # putting dataframe rows into one a single dataframe
+    results_df = pd.concat(results_df, ignore_index = True)
         
-    return super_result
+    return results_df
     
-    
-super_result = concatenate_results_from_models(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
+# variable name: results_df_[correlation]_[error_variance]_[time-lag]
+results_df = phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
 
-super_result = Parallel(n_jobs=2)(delayed(concatenate_results_from_models)(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
-     for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags))
+# super_result = Parallel(n_jobs=1)(delayed(phi_in_variational_inference)(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
+#     for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags))
 
-
+results_df.to_pickle(path_out1+r'results_df_' + str(all_rho[0]).replace('.', '') + '_' + str(all_errvar[0]).replace('.', '')  + '_' + str(all_timelags[0]) +'.pkl')
+# results_df_05_001_1 = pd.read_pickle(path_out1+r'results_df_05_001_1.pkl')
 
 
 
 # for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags):
 #     your_result = get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
 
-#super_df.to_pickle(path_out1+r'super_df.pkl')
-#super_df = pd.read_pickle(path_out1+r'super_df.pkl')
+# super_df.to_pickle(path_out1+r'super_df.pkl')
+# super_df = pd.read_pickle(path_out1+r'super_df.pkl')
 
 #np.save(os.path.join(path_out1, 'super_df.npy'), super_df)
 
@@ -263,47 +234,26 @@ super_result = Parallel(n_jobs=2)(delayed(concatenate_results_from_models)(all_r
 #%% plotting
 
 # ----------------------------------------------------------------------------
-# plots with pandas dataframe
+# plots for phiid atoms & compositions
 # ----------------------------------------------------------------------------
 
-super_df_phiid_terms = ['rtr', 'sts', 'synergy_phiid', 'transfer_phiid', 'emergence_capacity_phiid', 'downward_causation_phiid', 'phi_phiid', 'phiR_phiid']
+phiid_terms = ['rtr', 'sts', 'synergy_phiid', 'transfer_phiid', 'emergence_capacity_phiid', 'downward_causation_phiid', 'phi_phiid', 'phiR_phiid']
                 
-# plots per error variance (looping over correlations)
+# plots per correlation, error variance, and time-lag
 for correlation in all_rho:
     for error_variance in all_errvar:
         for time_lag in all_timelags:
             
-            #num_ticks = 10
-            #yticks = np.linspace(0, len(temp_model_measure) - 1, num_ticks, dtype = int)
-            #xticks = np.linspace(0, len(temp_model) - 1, num_ticks, dtype = int)            
-            #xticklabels = ["{:.2f}".format(temp_model_measure.columns[idx]) for idx in xticks]
-
-                
-            #fig, axs = plt.subplots(1, 1) 
-            #temp_model.plot(kind = 'line', x = time, y = quantity, alpha = 0.8)
-            #fig, axs = plt.subplots(1, 1)
-            #fig.suptitle(quantity, fontsize = 10)  
-            #axs.plot(time, temp_model, label = quantity, color = 'b', alpha = 0.8)
-            #axs.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
-            #axs.set_xticks(xticks)
-            #ax.set_xticklabels(xticklabels, rotation = 0)
-            #axs.set_title('rho = {}'.format(correlation) + ', error variance = {}'.format(error_variance) + ', time-lag = {}'.format(time_lag))
-            
-    
-            
-            # index for the phiid terms to be plotted; increases after each loop
-            # time for x-axis
-            time = np.arange(1, 1996, 1).tolist()
+            # index for the phiid terms to be plotted, time for x-axis
+            time = np.arange(time_lag, T, 1).tolist()
              
             fig, axs = plt.subplots(4, 2, figsize=(8, 10))
-            fig.suptitle('rho = {}'.format(correlation), fontsize = 10)
-            #axs.set_title('rho = {}'.format(correlation) + ', error variance = {}'.format(error_variance) + ', time-lag = {}'.format(time_lag))
+            fig.suptitle('rho = {}'.format(correlation)+', error variance = {}'.format(error_variance)+', time-lag = {}'.format(time_lag), fontsize = 10)
+
             axs = axs.flatten()
-            #for axis1 in range(4):
-                #for axis2 in range(2):
                     
             for index, ax in enumerate(axs):
-                temp_model = super_df.loc[((super_df.correlation == correlation) & (super_df.error_variance == error_variance) & (super_df.time_lag == time_lag)), super_df_phiid_terms[index]]
+                temp_model = results_df.loc[((results_df.correlation == correlation) & (results_df.error_variance == error_variance) & (results_df.time_lag == time_lag)), phiid_terms[index]]
 
                 # calculate moving average
                 moving_average_window = 120
@@ -324,19 +274,68 @@ for correlation in all_rho:
                         number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l+moving_average]))
                         moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l+moving_average])/number_of_numbers_in_sum                     
                 
-                #fig, axs = plt.subplots(4, 2)
-                
-                ax.plot(time, temp_model, label = super_df_phiid_terms[index], color = 'b', alpha = 0.8)
+                ax.plot(time, temp_model, label = phiid_terms[index], color = 'b', alpha = 0.6)
                 ax.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
-                ax.set_title('error variance = {}'.format(all_errvar[0]), color = 'r', pad=10)
+                ax.set_title(phiid_terms[index], color = 'r', pad=10)
             fig.tight_layout()
                 
 
-            fig.savefig(path_out2 + '/' + quantity + '_' + error_variance.replace('.', '') + '_' + correlation.replace('.', '') + '.png', dpi=300, bbox_inches='tight')  
+            fig.savefig(path_out2 + 'phiid_quantities_' + str(correlation).replace('.', '') + '_' + str(error_variance).replace('.', '')  + '_' + str(time_lag) + '.png', dpi=300, bbox_inches='tight')  
+            plt.cla()
+            del fig
+
+# ----------------------------------------------------------------------------
+# plots for phi, phiR, KL-divergence, and double-redundancy
+# ----------------------------------------------------------------------------
+
+quantities = ['kldiv', 'phi', 'phiR', 'double_red']
+                
+# plots per correlation, error variance, and time-lag
+for correlation in all_rho:
+    for error_variance in all_errvar:
+        for time_lag in all_timelags:
+            
+            # index for the phiid terms to be plotted, time for x-axis
+            time = np.arange(time_lag, T, 1).tolist()
+             
+            fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+            fig.suptitle('rho = {}'.format(correlation)+', error variance = {}'.format(error_variance)+', time-lag = {}'.format(time_lag), fontsize = 10)
+
+            axs = axs.flatten()
+                    
+            for index, ax in enumerate(axs):
+                temp_model = results_df.loc[((results_df.correlation == correlation) & (results_df.error_variance == error_variance) & (results_df.time_lag == time_lag)), quantities[index]]
+
+                # calculate moving average
+                moving_average_window = 120
+                moving_average = np.int(np.float(T/moving_average_window))                                         
+                moving_average_vector = np.array(range(0,len(temp_model),1))
+                moving_average_vector = moving_average_vector.astype(np.float64)
+                moving_average_vector.fill(np.nan) 
+                raw_vector = np.ma.array(temp_model, mask=np.isnan(temp_model))
+        
+                for l in range(len(temp_model)):
+                    if l < moving_average:
+                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l:l+moving_average]))
+                        moving_average_vector[l] = np.sum(raw_vector[l:l+moving_average])/number_of_numbers_in_sum
+                    elif l > (len(raw_vector)-moving_average):
+                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l]))
+                        moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l])/number_of_numbers_in_sum
+                    else:    
+                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l+moving_average]))
+                        moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l+moving_average])/number_of_numbers_in_sum                     
+                
+                ax.plot(time, temp_model, label = quantities[index], color = 'b', alpha = 0.6)
+                ax.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
+                ax.set_title(quantities[index], color = 'r', pad=10)
+            fig.tight_layout()
+                
+
+            fig.savefig(path_out2 + 'kldiv_phiR_double_red_' + str(correlation).replace('.', '') + '_' + str(error_variance).replace('.', '')  + '_' + str(time_lag) + '.png', dpi=300, bbox_inches='tight')  
             plt.cla()
             del fig
         
-        
+#%% OLD  
 # ----------------------------------------------------------------------------
 # plots for phi, phi-R, kl-div, double-red
 # ----------------------------------------------------------------------------
@@ -484,61 +483,6 @@ for j in range(len(all_errvar)):
     del fig
     plt.cla()
     
-# ----------------------------------------------------------------------------
-# plots for phiid atoms & compositions
-# ----------------------------------------------------------------------------
 
-phiid_terms_dict = {'all_rho_errvar_timelags_synergy_phiid', 'all_rho_errvar_timelags_downward_causation_phiid',
-              'all_rho_errvar_timelags_double_red_phiid', 'all_rho_errvar_timelags_transfer_phiid', 
-              'all_rho_errvar_timelags_causal_decoupling_phiid', 'all_rho_errvar_timelags_emergence_capacity_phiid'}
-
-plt.rcParams['xtick.labelsize'] = 6
-plt.rcParams['ytick.labelsize'] = 6
-plt.rcParams['axes.titlesize'] = 7
-plt.rcParams['axes.titlecolor'] = 'r'
-plt.rcParams['axes.labelsize'] = 7
-plt.rcParams['axes.labelcolor'] = 'g'
-plt.rcParams['lines.linewidth'] = 0.2
-plt.rcParams['axes.prop_cycle'] = plt.cycler(color=["b", "0.4"]) 
-    
-# plots per error variance (looping over correlations)
-for j in range(len(all_errvar)):
-    for h in phiid_terms_dict:
-
-        for f in range(len(all_rho)):
-
-            moving_average_window = 120
-            moving_average = np.int(np.float(T/moving_average_window))                                         # adjust according to iteration length; 100 is good for num_iters_GD = 5000, 30 for num_iters_GD = 500 and 250; 40 for num_iters_GD = 1000; 50 for num_iters_GD = 2000; 160 for num_iters_GD = 12000
-            moving_average_vector = np.array(range(0,len(super_dict[h][f,j,k,:]),1))
-            moving_average_vector = moving_average_vector.astype(np.float64)
-            moving_average_vector.fill(np.nan) 
-            raw_vector = np.ma.array(super_dict[h][f,j,k,:], mask=np.isnan(super_dict[h][f,j,k,:]))
-
-            for i in range(len(super_dict[h][f,j,k,:])):
-                if i < moving_average:
-                    number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[i:i+moving_average]))
-                    moving_average_vector[i] = np.sum(raw_vector[i:i+moving_average])/number_of_numbers_in_sum
-                elif i > (len(raw_vector)-moving_average):
-                    number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[i-moving_average:i]))
-                    moving_average_vector[i] = np.sum(raw_vector[i-moving_average:i])/number_of_numbers_in_sum
-                else:    
-                    number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[i-moving_average:i+moving_average]))
-                    moving_average_vector[i] = np.sum(raw_vector[i-moving_average:i+moving_average])/number_of_numbers_in_sum #Originally, it was (moving_average*2), but we need to divide by the numbers that went into the calculation of the sum (which has ignored nan values).
-
-
-            fig, axs = plt.subplots(1, 1) 
-            fig.suptitle(h.replace('all_rho_errvar_timelags_',''), fontsize = 10)  
-            axs.plot(super_dict[h][f,j,k,:])
-            axs.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
-            axs.set_title('rho = {}'.format(all_rho[f]))
-            
-            fig.savefig(path_out2 + '/' + h + '_' + str(all_errvar[j]).replace('.', '') + '_' + str(all_rho[f]).replace('.', '') + '.png', dpi=300, bbox_inches='tight')  
-            plt.cla()
-            del fig
-        
-    
-    # fig.savefig(r'\\media\\nadinespy\\NewVolume\\my_stuff\\work\\other_projects\\FEP_IIT_some_thoughts\\viiit_with_miguel\\results\\' 
-    #             +r'all_errvar_phi_rho'+str(all_rho[i]).replace('.', '')+r'.png', dpi=300,
-    #             bbox_inches='tight')  
 
 
