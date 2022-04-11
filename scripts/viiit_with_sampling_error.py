@@ -12,226 +12,340 @@ from matplotlib import pyplot as plt
 import os
 from oct2py import octave as oc
 import pandas as pd
-from joblib import Parallel, delayed
+# from joblib import Parallel, delayed
 from itertools import product
 
-main_path = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/scripts'
-os.chdir(main_path)
 
+main_path = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/' \
+    'viiit_with_miguel/IntegratedInformationInVariationalInference/scripts'
+os.chdir(main_path)
 import iit_in_vi as iv
+
 
 oc.addpath(main_path)
 oc.javaaddpath(main_path+'/infodynamics.jar')
 oc.eval('pkg load statistics')
-    
-path_out1 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/analyses/'
-path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/viiit_with_miguel/IntegratedInformationInVariationalInference/results/plots/'
 
-#%%
+path_out1 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/' \
+    'viiit_with_miguel/IntegratedInformationInVariationalInference/results/analyses/'
+path_out2 = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/' \
+    'viiit_with_miguel/IntegratedInformationInVariationalInference/results/plots/'
+
+# %%
 
 # parameters to loop over
-#all_rho = np.array([-0.9, -0.7, -0.5, -0.3,                                     # correlation coefficients
-#        0.0, 0.3, 0.5, 0.7, 0.9])       
+# all_rho = np.array([-0.9, -0.7, -0.5, -0.3,            # correlation coefficients
+#          0.0, 0.3, 0.5, 0.7, 0.9])
 
-#all_timelags = np.array([1, 5, 10, 25, 50, 75, 100, 150, 200])                  # delay measured in integration steps
+# all_timelags = np.array([1, 5, 10, 25, 50, 75,         # delays (integration steps)
+#          100, 150, 200])
 
-#all_errvar = [0.0001, 0.001, 0.01, 0.1,                                         # error variance
-#         0.3, 0.5, 0.7, 1.0, 1.2]            
+# all_errvar = [0.0001, 0.001, 0.01, 0.1,                # error variances
+#          0.3, 0.5, 0.7, 1.0, 1.2]
 
+# all_weights = [0.0, 0.125, 0.25, 0.375,                # error variances
+#          0.5, 0.625, 0.75, 0.875, 1.0]
 
-all_rho = np.array([0.5])                                     
+# all_rho = np.array([-0.9, -0.7, -0.5, -0.3,            # off-diagonal covariances
+#          0.0, 0.3, 0.5, 0.7, 0.9])
+
+# ----------------------------------------------------------------
+# ADJUST PARAMETERS
+# ----------------------------------------------------------------
+
+all_rho = np.array([0.5])
 all_errvar = np.array([0.01])
 all_timelags = np.array([10])
+all_weights = np.array([1])
+all_off_diag_covs = ([0])
 
-                            
+# ----------------------------------------------------------------
+
 # other parameters
+
+
+T = 1000
+dt = 0.01                                                # integration step
+
 np.random.seed(10)
-mu = np.random.randn(2)                                                         # mean of referene distribution
-mu = np.array([1,-1])                                      
+initial_mx = np.random.rand(2)                           # initial means at t = 0
 
-T = 2000
-dt = 0.01                                                                       # integration step
-mx = np.zeros((2,T))                                                            # mean vector of variational parameters
-mx[:,0] = np.random.rand(2)                                                     # initial random values for mean variational parameters at t = 1 
-initial_mx = mx[:,0]         
+# initial covariance at t = 0
+# off_diag_cov = np.random.uniform(-1, 1, 1)
+initial_cov = np.zeros((2, 2))
+initial_cov[0, 1] = all_off_diag_covs
+initial_cov[1, 0] = all_off_diag_covs
 
-print('initial mean at t = 0: ', mx)
+print('initial means at t = 0: ', initial_mx)
+
+# %%
 
 
-def get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu):
+def get_results_from_model(rho, errvar, time_lag, T, dt, initial_mx,
+                           initial_cov, weights):
     """docstring"""
-    
+
+    errvar = errvar/np.sqrt(2/dt)
+
+    # ----------------------------------------------------------------
+    # INITIALIZE VARATIONAL MEANS, COVARIANCES, & KL-DIVERGENCE
+    # ----------------------------------------------------------------
+
+    mx = np.zeros((2, T))                               # variational mean vector
+    mx[:, 0] = initial_mx                               # initial means
+
+    COV = np.zeros((2, 2, T))                           # same-time covariance matrix
+    COV[:, :, 0] = initial_cov                          # initial covariance
+
+    time_lagged_COV = np.zeros((2, 2, T))                           # time-lagged (one unit) covariance matrix
+
+    # conditional time-lagged covariance matrices
+    time_lagged_COND_COV = np.zeros((2, 2, T))
+    time_lagged_COND_COV_part11 = np.zeros((T))
+    time_lagged_COND_COV_part22 = np.zeros((T))
+    time_lagged_COND_COV_part12 = np.zeros((T))
+    time_lagged_COND_COV_part21 = np.zeros((T))
+
+    kldiv = np.zeros(T)                                 # KL-divergence
+
+    # ----------------------------------------------------------------
+    # GET TRUE MEANS, AND TRUE (WEIGHTED) & MEAN-FIELD COVARIANCE
+    # ----------------------------------------------------------------
+
+    np.random.seed(10)
+    true_means = np.random.randn(2)                     # means of true distribution
+
+    # covariance of true distribution
+    true_cov = np.eye(2)
+    true_cov[0, 1] = np.sqrt(true_cov[0, 0] * true_cov[1, 1]) * rho
+    true_cov[1, 0] = true_cov[0, 1]
+
+    inv_true_cov = la.inv(true_cov)                     # inverse of covariance
+
+    mean_field_inv_true_cov = np.diag(inv_true_cov)
+
+    # weighted inverse of covariance
+    weighted_inv_true_cov = inv_true_cov.copy()
+    weighted_inv_true_cov[0, 1] = weights*inv_true_cov[0, 1]
+    weighted_inv_true_cov[1, 0] = weights*inv_true_cov[1, 0]
+
+    print('inv_true_covariance: ', inv_true_cov)
+    print('weighted_inv_true_covariance: ', weighted_inv_true_cov)
+    print('mean_field_inv_true_covariance: ', mean_field_inv_true_cov)
+
     df = []
-    
-    S = np.zeros((2,2))                                                         # covariance of reference distribution
-    S[0,0] = 1
-    S[1,1] = 1
-    
-    
-    S[0,1] = np.sqrt(S[0,0]*S[1,1]) * rho
-    S[1,0] = S[0,1]
-    A = la.inv(S)                                                               # inverse of covariance
-    B = np.diag(A)                                                             
-     
-    
-    Sx0 = np.zeros((2,2,T))                                                     # same-time covariance matrix of variational parameters
-    Sx0[:,:,0] = np.eye(2)  
-    initial_covariance = Sx0[:,:,0]                                             # initial covariance of parameters at t = 0
-    Sx1 = np.zeros((2,2,T))                                                     # time-delayed (one unit) covariance matrix of variational parameters
-    
-    kldiv = np.zeros(T)
-    
+
     # ----------------------------------------------------------------
     # CALCULATE TIME-LAGGED & CONDITIONAL COVARIANCE MATRICES
     # ----------------------------------------------------------------
-    
+
     # time-lagged covariance matrices
-    for n in range(T):                                                          # loop over time-points 
+    for n in range(T):                                  # loop over time-points
         t = n * dt
-        mx[:,n] = iv.get_var_mean(A, t, mu, initial_mx)
-        Sx0[:,:,n] = iv.get_var_cov(A, t, errvar, initial_covariance)
-    
+        mx[:, n] = iv.get_mean(weighted_inv_true_cov, t, true_means, initial_mx)
+
+        COV[:, :, n] = iv.get_cov(weighted_inv_true_cov, t, errvar, initial_cov)
+
         if n > time_lag:
             s = (n-time_lag) * dt
-            Sx1[:,:,n] = iv.get_var_time_lagged_cov(A, t, s, errvar, initial_covariance)
-    
-    
-    # conditional covariance matrices
-    Sx1_conditional = np.zeros((2,2,T))
-    Sx1_conditional_part11 = np.zeros((T))
-    Sx1_conditional_part22 = np.zeros((T))
-    Sx1_conditional_part12 = np.zeros((T))
-    Sx1_conditional_part21 = np.zeros((T))
-    
-    for n in range(1+time_lag,T):                                                 # loop over time-points
-        try:  
-            var_cov_present = Sx0[:,:,n]
-            var_cov_past = Sx0[:,:,n-time_lag]
-            var_cov_present_parts11 = Sx0[0,0,n]
-            var_cov_past_parts11 = Sx0[0,0,n-time_lag]
-            var_cov_present_parts22 =  Sx0[1,1,n]
-            var_cov_past_parts22 = Sx0[1,1,n-time_lag]
-            
-            var_time_lagged_cov_present = Sx1[:,:,n]
-            var_time_lagged_cov_present_parts11 = Sx1[0,0,n]
-            var_time_lagged_cov_present_parts21 = Sx1[1,0,n]
-            var_time_lagged_cov_present_parts22 = Sx1[1,1,n]
-            var_time_lagged_cov_present_parts12 = Sx1[0,1,n]
-            
-            Sx1_conditional[:,:,n] = iv.get_var_cond_cov_full(var_cov_past, var_cov_present, var_time_lagged_cov_present) 
-            Sx1_conditional_part11[n] = iv.get_var_cond_cov_parts(var_cov_past_parts11, var_cov_present_parts11, var_time_lagged_cov_present_parts11)
-            Sx1_conditional_part22[n] = iv.get_var_cond_cov_parts(var_cov_past_parts22, var_cov_present_parts22, var_time_lagged_cov_present_parts22)        
-            Sx1_conditional_part12[n] = iv.get_var_cond_cov_parts(var_cov_past_parts11, var_cov_present_parts22, var_time_lagged_cov_present_parts21)
-            Sx1_conditional_part21[n] = iv.get_var_cond_cov_parts(var_cov_past_parts22, var_cov_present_parts11, var_time_lagged_cov_present_parts12)
-        except:
-            pass 
-    
+            time_lagged_COV[:, :, n] = iv.get_time_lagged_cov(weighted_inv_true_cov,
+                                                  t, s, errvar, initial_cov)
+
+    for n in range(1+time_lag, T):                       # loop over time-points
+        try:
+            cov_present = COV[:, :, n]
+            cov_past = COV[:, :, n - time_lag]
+            cov_present_parts11 = COV[0, 0, n]
+            cov_past_parts11 = COV[0, 0, n-time_lag]
+            cov_present_parts22 = COV[1, 1, n]
+            cov_past_parts22 = COV[1, 1, n-time_lag]
+            time_lagged_cov_present = time_lagged_COV[:, :, n]
+            time_lagged_cov_present_parts11 = time_lagged_COV[0, 0, n]
+            time_lagged_cov_present_parts21 = time_lagged_COV[1, 0, n]
+            time_lagged_cov_present_parts22 = time_lagged_COV[1, 1, n]
+            time_lagged_cov_present_parts12 = time_lagged_COV[0, 1, n]
+
+            time_lagged_COND_COV[:, :, n] = iv.get_cond_cov_full(cov_past, cov_present,
+                                                            time_lagged_cov_present)
+            time_lagged_cond_cov_part11[n] = iv.get_cond_cov_parts(
+                cov_past_parts11,
+                cov_present_parts11,
+                time_lagged_cov_present_parts11)
+            time_lagged_cond_cov_part22[n] = iv.get_cond_cov_parts(
+                cov_past_parts22,
+                cov_present_parts22,
+                time_lagged_cov_present_parts22)
+            time_lagged_cond_cov_part12[n] = iv.get_cond_cov_parts(
+                cov_past_parts11,
+                cov_present_parts22,
+                time_lagged_cov_present_parts21)
+            time_lagged_cond_cov_part21[n] = iv.get_cond_cov_parts(
+                cov_past_parts22,
+                cov_present_parts11,
+                time_lagged_cov_present_parts12)
+        except ZeroDivisionError:
+            print('Divided by zero')
+
     # ----------------------------------------------------------------
     # CALCULATE DOUBLE-REDUNDANCY
     # ----------------------------------------------------------------
-    
-    double_red = iv.get_double_red_mmi(Sx0, Sx1_conditional, Sx1_conditional_part11, Sx1_conditional_part22, Sx1_conditional_part12, Sx1_conditional_part21, time_lag)
-    
+
+    double_red = iv.get_double_red_mmi(COV,
+                                       time_lagged_COND_COV,
+                                       time_lagged_COND_COV_part11,
+                                       time_lagged_COND_COV_part22,
+                                       time_lagged_COND_COV_part12,
+                                       time_lagged_COND_COV_part21,
+                                       time_lag)
+
     # ----------------------------------------------------------------
     # CALCULATE PHI, PHI-R, KL-DIVERGENCE, & PHIID-BASED QUANTITIES
     # ----------------------------------------------------------------
-    
-    
-    for n in range(time_lag,T):                                                   # loop over time-points
-        print(n) 
-        
+
+    for n in range(time_lag, T):                         # loop over time-points
+        print(n)
+
         # ----------------------------------------------------------------
         # KL DIVERGENCE
         # ----------------------------------------------------------------
-        
-        variational_covariance = Sx0[:,:,n]
-        variational_mean = mx[:,n]
-        kldiv = iv.get_kl_div(A, B, mu, variational_mean, variational_covariance)
-        
+
+        cov_temp = COV[:, :, n]
+        means_temp = mx[:, n]
+        kldiv = iv.get_kl_div(inv_true_cov, mean_field_inv_true_cov,
+                              true_means, means_temp, cov_temp)
+
         # ----------------------------------------------------------------
         # PHI & PHI-R
         # ----------------------------------------------------------------
-        
-        try:                    
-            var_cov_past = Sx0[:,:,n-time_lag] 
-            var_cond_cov_present_full = Sx1_conditional[:,:,n] 
-            var_cov_past_parts11 = Sx0[0,0,n-time_lag] 
-            var_cond_cov_present_parts11 = Sx1_conditional[0,0,n]
-            var_cond_cov_past_parts22 = Sx0[1,1,n-time_lag]
-            var_cond_cov_present_parts22 = Sx1_conditional[1,1,n]
-            
-            phi = iv.get_phi(var_cov_past, var_cond_cov_present_full, var_cov_past_parts11, var_cond_cov_present_parts11, var_cond_cov_past_parts22, var_cond_cov_present_parts22)
-                
+
+        try:
+            # might need to assign other values (e. g., time_lagged_COND_COV_part12),
+            # as here, we're not conditioning on single variables
+            cov_past = COV[:, :, n-time_lag]
+            cond_cov_present_full = time_lagged_COND_COV[:, :, n]
+            cov_past_parts11 = COV[0, 0, n-time_lag]
+            cond_cov_present_parts11 = time_lagged_COND_COV[0, 0, n]
+            cov_past_parts22 = COV[1, 1, n-time_lag]
+            cond_cov_present_parts22 = time_lagged_COND_COV[1, 1, n]
+
+            phi = iv.get_phi(cov_past,
+                             cond_cov_present_full,
+                             cov_past_parts11,
+                             cond_cov_present_parts11,
+                             cov_past_parts22,
+                             cond_cov_present_parts22)
+
             phiR = phi + double_red[n]
-            
-        except: #RuntimeWarning
+
+        except RuntimeError:
             phi = float('NaN')
             phiR = float('NaN')
+            print('phi and phiR are assigned NaN')
 
         # ----------------------------------------------------------------
         # PHIID BASED QUANTITIES
         # ----------------------------------------------------------------
-        
+
         # simulate time-series with given covariance matrix
-        time_series = np.random.multivariate_normal(mx[:,n], Sx0[:,:,n], T).T
-        phiid, emergence_capacity_phiid, downward_causation_phiid, synergy_phiid, transfer_phiid, phi_phiid, phiR_phiid = iv.get_phiid(time_series, time_lag, 'mmi')
-        
-        df_temp = pd.DataFrame({'correlation': [rho], 'error_variance': [errvar], 'time_lag': [time_lag], 'time_point' : [n],
-                                 'phi': [phi], 'phiR': [phiR], 'kldiv': [kldiv], 'double_red': [double_red[n]], 'rtr': [phiid.rtr], 'rtx': [phiid.rtx], 
-                                 'rty': [phiid.rty], 'rts': [phiid.rts], 'xtr': [phiid.xtr], 'xtx': [phiid.xtx], 'xty': [phiid.xty], 'xts': [phiid.xts], 
-                                 'ytr': [phiid.ytr], 'ytx': [phiid.ytx], 'yty': [phiid.yty], 'yts': [phiid.yts], 'str': [phiid.str], 'stx': [phiid.stx], 
-                                 'sty': [phiid.sty], 'sts': [phiid.sts], 'synergy_phiid': [synergy_phiid], 'transfer_phiid': [transfer_phiid], 
-                                 'emergence_capacity_phiid': [emergence_capacity_phiid], 'downward_causation_phiid': [downward_causation_phiid], 
-                                 'phi_phiid': [phi_phiid], 'phiR_phiid': [phiR_phiid]})
-        
+        time_series = np.random.multivariate_normal(mx[:, n], COV[:, :, n], T).T
+
+        [phiid,
+         emergence_capacity_phiid,
+         downward_causation_phiid,
+         synergy_phiid,
+         transfer_phiid,
+         phi_phiid,
+         phiR_phiid] = iv.get_phiid(time_series, time_lag, 'mmi')
+
+        df_temp = pd.DataFrame({'correlation': [rho],
+                                'error_variance': [errvar],
+                                'time_lag': [time_lag],
+                                'time_point': [n],
+                                'phi': [phi],
+                                'phiR': [phiR],
+                                'kldiv': [kldiv],
+                                'double_red': [double_red[n]],
+                                'rtr': [phiid.rtr],
+                                'rtx': [phiid.rtx],
+                                'rty': [phiid.rty],
+                                'rts': [phiid.rts],
+                                'xtr': [phiid.xtr],
+                                'xtx': [phiid.xtx],
+                                'xty': [phiid.xty],
+                                'xts': [phiid.xts],
+                                'ytr': [phiid.ytr],
+                                'ytx': [phiid.ytx],
+                                'yty': [phiid.yty],
+                                'yts': [phiid.yts],
+                                'str': [phiid.str],
+                                'stx': [phiid.stx],
+                                'sty': [phiid.sty],
+                                'sts': [phiid.sts],
+                                'synergy_phiid': [synergy_phiid],
+                                'transfer_phiid': [transfer_phiid],
+                                'emergence_capacity_phiid': [emergence_capacity_phiid],
+                                'downward_causation_phiid': [downward_causation_phiid],
+                                'phi_phiid': [phi_phiid],
+                                'phiR_phiid': [phiR_phiid]})
+
         df.append(df_temp)
-        
-    return df   
+
+    return df
 
 
-def phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt, mx, mu):
+def phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt,
+                                 initial_mx, initial_cov, weights):
     results_df = []
 
     # storing each dataframe in a list
-    results = [get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
-                                    for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags)]
+    results = [get_results_from_model(rho, errvar, time_lag, T, dt,
+                                      initial_mx, initial_cov, weights)
+               for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags)]
 
     # unpacking dataframes so that each row is not of type "list", but of type "dataframe"
     for dataframe in results:
-        unpack_dataframe = pd.concat(dataframe, ignore_index = True)
+        unpack_dataframe = pd.concat(dataframe, ignore_index=True)
         results_df.append(unpack_dataframe)
-    
-    # putting dataframe rows into one a single dataframe
-    results_df = pd.concat(results_df, ignore_index = True)
-        
-    return results_df
-    
-# variable name: results_df_[correlation]_[error_variance]_[time-lag]
-results_df = phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
 
-# super_result = Parallel(n_jobs=1)(delayed(phi_in_variational_inference)(all_rho, all_errvar, all_timelags, T, dt, mx, mu)
+    # putting dataframe rows into one a single dataframe
+    results_df = pd.concat(results_df, ignore_index=True)
+
+    return results_df
+
+
+# variable name: results_df_[correlation]_[error_variance]_[time-lag]
+results_df = phi_in_variational_inference(all_rho, all_errvar, all_timelags, T, dt,
+                                          initial_mx, initial_cov, all_weights)
+
+# super_result = Parallel(n_jobs=1)(delayed(phi_in_variational_inference)
+#     (all_rho, all_errvar, all_timelags, T, dt, mx)
 #     for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags))
 
-results_df.to_pickle(path_out1+r'results_df_' + str(all_rho[0]).replace('.', '') + '_' + str(all_errvar[0]).replace('.', '')  + '_' + str(all_timelags[0]) +'.pkl')
+results_df.to_pickle(path_out1 +
+                     r'results_df_' +
+                     str(all_rho[0]).replace('.', '') +
+                     '_' +
+                     str(all_errvar[0]).replace('.', '') +
+                     '_' + str(all_timelags[0]) +
+                     '.pkl')
+
 # results_df_05_001_1 = pd.read_pickle(path_out1+r'results_df_05_001_1.pkl')
 
-
-
 # for rho, errvar, time_lag in product(all_rho, all_errvar, all_timelags):
-#     your_result = get_results_from_model(rho, errvar, time_lag, T, dt, mx, mu)
+#     your_result = get_results_from_model(rho, errvar, time_lag, T, dt, mx)
 
 # super_df.to_pickle(path_out1+r'super_df.pkl')
 # super_df = pd.read_pickle(path_out1+r'super_df.pkl')
 
-#np.save(os.path.join(path_out1, 'super_df.npy'), super_df)
+# np.save(os.path.join(path_out1, 'super_df.npy'), super_df)
 
-
-# TO DO 
-# loop needs to be continued as of all_rho[1] (a few values for all_rho[1] that have already been calculated need to be eliminated from super_df)
+# TO DO
+# loop needs to be continued as of all_rho[1] (a few values for all_rho[1]
+# that have already been calculated need to be eliminated from super_df)
 # parallelize for loops
 
-        
-#%% plotting
+
+# %% plotting
 
 # ----------------------------------------------------------------------------
 # plots for phiid atoms & compositions
