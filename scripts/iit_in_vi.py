@@ -9,6 +9,7 @@ import numpy as np
 import scipy.linalg as la
 from oct2py import octave as oc
 import os
+import matlab.engine
 
 
 # logarithm of the determinant of matrix A
@@ -84,16 +85,16 @@ def get_kl_div(A, B, mu, mean, covariance):
 
 def get_phi(cov_past, cond_cov_present_full, cov_past_parts11, cond_cov_present_parts11,
             cov_past_parts22, cond_cov_present_parts22):
-    phi = (0.5 * np.log(np.linalg.det(cov_past) / ((np.linalg.det(cond_cov_present_full))+0j) /
-                        (cov_past_parts11/(cond_cov_present_parts11+0j)) /
-                        (cov_past_parts22/(cond_cov_present_parts22+0j)))).real
+    phi = (0.5 * np.log(np.linalg.det(cov_past) / ((np.linalg.det(cond_cov_present_full))+0j) / 
+        (cov_past_parts11/(cond_cov_present_parts11+0j)) / 
+        (cov_past_parts22/(cond_cov_present_parts22+0j)))).real
     return phi
 
 
 def get_phiid(time_series, time_lag, redundancy_func):
 
-    main_path = '/media/nadinespy/NewVolume/my_stuff/work/other_projects/FEP_IIT_some_thoughts/' \
-        'viiit_with_miguel/IntegratedInformationInVariationalInference/scripts'
+    main_path = '/media/nadinespy/NewVolume1/work/current_projects/viiit/viiit_with_miguel/' \
+        'IntegratedInformationInVariationalInference/scripts/'
     os.chdir(main_path)
     oc.addpath(main_path)
     oc.javaaddpath(main_path+'/infodynamics.jar')
@@ -135,3 +136,53 @@ def get_phiid(time_series, time_lag, redundancy_func):
 
     return phiid, emergence_capacity_phiid, downward_causation_phiid, synergy_phiid,
     transfer_phiid, phi_phiid, phiR_phiid
+
+def get_phiid_analytical(time_lagged_COV, time_lagged_COV_time_lag, time_lagged_COND_COV, mx, mx_time_lag, redundancy_func):
+
+    print('we got until a')
+    # Matlab engine stuff 
+    eng = matlab.engine.start_matlab()
+    
+    # building full time-lagged covariance matrix (2xD-by-2xD):
+    # \Sigma(X) = [[\Sigma_x1(t)x1 (t)    \Sigma_x1(t)x2(t)         \Sigma_x1(t)x1(t-tau)         \Sigma_x1(t)x2(t-tau)]                        
+    #         [\Sigma_x2(t)x1(t)          \Sigma_x2(t)x2(t)         \Sigma_x2(t)x1(t-tau)         \Sigma_x2(t)x2(t-tau)]
+    #         [\Sigma_x1(t-tau)x1(t)      \Sigma_x1(t-tau)x2(t)     \Sigma_x1(t-tau)x1(t-tau)     \Sigma_x1(t-tau)x2(t-tau)]   
+    #         [\Sigma_x2(t-tau)x1(t)      \Sigma_x2(t-tau)x2(t)     \Sigma_x2(t-tau)x1(t-tau)     \Sigma_x2(t-tau)x2(t-tau)]]
+
+    a = np.concatenate((time_lagged_COV, 
+                        time_lagged_COND_COV), axis=1)
+    b = np.concatenate((time_lagged_COND_COV, 
+                        time_lagged_COV_time_lag), axis=1)
+    full_time_lagged_COV = np.concatenate([a, b])
+    
+    print('we got until b')
+    
+    # building array of means corresponding to full time-lagged covariance matrix
+    all_means = np.concatenate((mx, mx_time_lag))
+        
+    # convert to matlab-compatible data type *double*
+    full_time_lagged_COV = matlab.double(full_time_lagged_COV.tolist())
+    all_means = matlab.double(all_means.tolist())
+    
+    print('we got until c')
+
+    phiid = eng.PhiIDFull_Analytical(full_time_lagged_COV, all_means, redundancy_func)
+    # synergy = causal decoupling + downward causation + upward causation
+
+    print('we got until d')
+    
+    emergence_capacity_phiid = phiid['str'] + phiid['stx'] + \
+        phiid['sty'] + phiid['sts']
+    downward_causation_phiid = phiid['str'] + phiid['stx'] + \
+        phiid['sty']
+    synergy_phiid = emergence_capacity_phiid + phiid['rts'] + \
+        phiid['xts'] + phiid['yts']
+    transfer_phiid = phiid['xty'] + phiid['ytx']
+    phi_phiid = - phiid['rtr'] + synergy_phiid + transfer_phiid
+    phiR_phiid = phi_phiid + phiid['rtr']
+    
+    print('we got until e')
+    
+    return (phiid, emergence_capacity_phiid, downward_causation_phiid, synergy_phiid, 
+            transfer_phiid, phi_phiid, phiR_phiid)
+   
