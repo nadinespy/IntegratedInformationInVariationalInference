@@ -77,7 +77,7 @@ all_rho = np.array([0.5])
 all_errvar = np.array([0.01])
 all_timelags = np.array([10])
 all_weights = np.array([1])
-all_off_diag_covs = ([0])
+all_off_diag_covs = ([0.1])
 
 # ----------------------------------------------------------------
 
@@ -205,7 +205,7 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, initial_mx,
                 cov_present_parts11,
                 time_lagged_cov_present_parts12)
         except ZeroDivisionError:
-            print('Divided by zero')        
+            print('Divided by zero')
 
     # ----------------------------------------------------------------
     # CALCULATE DOUBLE-REDUNDANCY
@@ -283,9 +283,6 @@ def get_results_from_model(rho, errvar, time_lag, T, dt, initial_mx,
                                                mx[:, n-time_lag], 
                                                'mmi')         
         
-        
-        
-        print('we got until f')
                                                
         # --------------------------------------------------------------------------------------------------------  
     
@@ -430,7 +427,12 @@ results_df.to_pickle(path_out1 +
                      '_' +
                      str(all_errvar[0]).replace('.', '') +
                      '_' + str(all_timelags[0]) +
+                     '_' + str(all_weights[0]).replace('.', '') +
+                     '_' + str(all_off_diag_covs[0]).replace('.', '') +
                      '.pkl')
+
+
+
 
 # results_df_05_001_1 = pd.read_pickle(path_out1+r'results_df_05_001_1.pkl')
 
@@ -460,47 +462,56 @@ phiid_terms = ['rtr', 'sts', 'synergy_phiid', 'transfer_phiid', 'emergence_capac
 for correlation in all_rho:
     for error_variance in all_errvar:
         for time_lag in all_timelags:
+            for weight in all_weights:
+                for off_diag_covs in all_off_diag_covs:
             
-            # index for the phiid terms to be plotted, time for x-axis
-            time = np.arange(time_lag, T, 1).tolist()
-             
-            fig, axs = plt.subplots(4, 2, figsize=(8, 10))
-            fig.suptitle('rho = {}'.format(correlation)+', error variance = {}'.format(error_variance)+', time-lag = {}'.format(time_lag), fontsize = 10)
-
-            axs = axs.flatten()
-                    
-            for index, ax in enumerate(axs):
-                temp_model = results_df.loc[((results_df.correlation == correlation) & (results_df.error_variance == error_variance/np.sqrt(2/dt)) & (results_df.time_lag == time_lag)), phiid_terms[index]]
-
-                # calculate moving average
-                moving_average_window = 120
-                moving_average = np.int(np.float(T/moving_average_window))                                         
-                moving_average_vector = np.array(range(0,len(temp_model),1))
-                moving_average_vector = moving_average_vector.astype(np.float64)
-                moving_average_vector.fill(np.nan) 
-                raw_vector = np.ma.array(temp_model, mask=np.isnan(temp_model))
+                    # index for the phiid terms to be plotted, time for x-axis
+                    time = np.arange(time_lag, T, 1).tolist()
+                     
+                    fig, axs = plt.subplots(4, 2, figsize=(8, 10))
+                    fig.suptitle('rho = {}'.format(correlation)+', error variance = {}'.format(error_variance)+', time-lag = {}'.format(time_lag), fontsize = 10)
         
-                for l in range(len(temp_model)):
-                    if l < moving_average:
-                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l:l+moving_average]))
-                        moving_average_vector[l] = np.sum(raw_vector[l:l+moving_average])/number_of_numbers_in_sum
-                    elif l > (len(raw_vector)-moving_average):
-                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l]))
-                        moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l])/number_of_numbers_in_sum
-                    else:    
-                        number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l+moving_average]))
-                        moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l+moving_average])/number_of_numbers_in_sum                     
+                    axs = axs.flatten()
+                            
+                    for index, ax in enumerate(axs):
+                        temp_model = results_df.loc[((results_df.correlation == correlation) & (results_df.error_variance == error_variance/np.sqrt(2/dt)) & (results_df.time_lag == time_lag)), phiid_terms[index]]
+        
+                        # calculate moving average
+                        moving_average_window = 120
+                        moving_average = np.int(np.float(T/moving_average_window))                                         
+                        moving_average_vector = np.array(range(0,len(temp_model),1))
+                        moving_average_vector = moving_average_vector.astype(np.float64)
+                        moving_average_vector.fill(np.nan) 
+                        raw_vector = np.ma.array(temp_model, mask=np.isnan(temp_model))
                 
-                ax.plot(time, temp_model, label = phiid_terms[index], color = 'b', alpha = 0.6)
-                ax.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
-                ax.set_title(phiid_terms[index], color = 'r', pad=10)
-            fig.tight_layout()
-                
+                        for l in range(len(temp_model)):
+                            if l < moving_average:
+                                number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l:l+moving_average]))
+                                moving_average_vector[l] = np.sum(raw_vector[l:l+moving_average])/number_of_numbers_in_sum
+                            elif l > (len(raw_vector)-moving_average):
+                                number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l]))
+                                moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l])/number_of_numbers_in_sum
+                            else:    
+                                number_of_numbers_in_sum = np.count_nonzero(~np.isnan(raw_vector[l-moving_average:l+moving_average]))
+                                moving_average_vector[l] = np.sum(raw_vector[l-moving_average:l+moving_average])/number_of_numbers_in_sum                     
+                        
+                        ax.plot(time, temp_model, label = phiid_terms[index], color = 'b', alpha = 0.6)
+                        ax.plot(moving_average_vector, label ='moving-average', color = 'k', linewidth = 1)
+                        ax.set_title(phiid_terms[index], color = 'r', pad=10)
+                    fig.tight_layout()
+                        
+        
+                    fig.savefig(path_out2 + 'phiid_quantities_' + 
+                                str(correlation).replace('.', '') + '_' + 
+                                str(error_variance).replace('.', '')  + '_' + 
+                                str(time_lag) + '_' +
+                                str(weight).replace('.', '') + '_' +
+                                str(off_diag_covs).replace('.', '') +
+                                '.png', dpi=300, bbox_inches='tight')  
+                    plt.cla()
+                    del fig
 
-            fig.savefig(path_out2 + 'phiid_quantities_' + str(correlation).replace('.', '') + '_' + str(error_variance).replace('.', '')  + '_' + str(time_lag) + '.png', dpi=300, bbox_inches='tight')  
-            plt.cla()
-            del fig
-
+# %% 
 # ----------------------------------------------------------------------------
 # plots for phi, phiR, KL-divergence, and double-redundancy
 # ----------------------------------------------------------------------------

@@ -43,25 +43,39 @@ def get_double_red_mmi(cov_matrix, cond_cov_matrix, cond_cov_part11,
     return double_redundancy_mmi
 
 
-def get_mean(A, t, mu, initial_mx):
-    mean = (np.eye(2)-la.expm(-A * t)) @ mu + la.expm(-A * t) @ initial_mx
-    return mean
+def get_mean_continuous(weighted_inv_true_cov, t, true_means, init_variational_means):
+    means = (np.eye(2)-la.expm(-weighted_inv_true_cov * t)) @ true_means + \
+        la.expm(-weighted_inv_true_cov * t) @ init_variational_means
+    return means
 
+def get_mean_discrete(gamma, weighted_inv_true_cov, previous_var_means, true_means):
+    var_means = (np.eye(2)- gamma *weighted_inv_true_cov) @ previous_var_means + \
+        gamma * weighted_inv_true_cov @ true_means
+    return var_means
 
-def get_cov(A, t, errvar, initial_covariance):
+def get_cov_continuous(weighted_inv_true_cov, t, errvar, initial_covariance):
     # not sure yet which of the following two is correct
-    covariance = la.expm(-A * t) @ initial_covariance @ la.expm(-A * t) + \
-                    0.5 * errvar**2 * A @ A @ la.inv(A) @ (np.eye(2) - la.expm(-A * 2 * t))
-    # covariance = la.expm(-A * t) @ initial_covariance  @ la.expm(-A.T * t)  + \
-    # 0.5 * errvar**2 * la.inv(A) @ (np.eye(2) - la.expm(-A * 2 * t))
+    covariance = la.expm(-weighted_inv_true_cov * t) @ initial_covariance \
+        @ la.expm(-weighted_inv_true_cov * t) + 0.5 * errvar**2 * weighted_inv_true_cov \
+            @ weighted_inv_true_cov @ la.inv(weighted_inv_true_cov) \
+                @ (np.eye(2) - la.expm(-weighted_inv_true_cov * 2 * t))
     return covariance
 
+def get_cov_discrete(gamma, weighted_inv_true_cov, previous_covariance):
+    covariance = (np.eye(2) - gamma *weighted_inv_true_cov) @ previous_covariance \
+        @ (np.eye(2) - gamma *weighted_inv_true_cov)  +  gamma**2 * weighted_inv_true_cov \
+            @ gamma @ weighted_inv_true_cov
+    return covariance
 
-def get_time_lagged_cov(A, t, s, errvar, initial_covariance):
-    time_lagged_covariance = la.expm(-A * (t+s)) @ initial_covariance + \
-        0.5 * errvar ** 2 * la.inv(A) @ (la.expm(A * (s - t)) - la.expm(A * (-t - s)))
+def get_time_lagged_cov_continuous(weighted_inv_true_cov, t, s, errvar, initial_covariance):
+    time_lagged_covariance = la.expm(-weighted_inv_true_cov * (t+s)) @ initial_covariance + \
+        0.5 * errvar ** 2 * la.inv(weighted_inv_true_cov) @ (la.expm(weighted_inv_true_cov * \
+            (s - t)) - la.expm(weighted_inv_true_cov * (-t - s)))
     return time_lagged_covariance
 
+def get_time_lagged_cov_discrete(gamma, weighted_inv_true_cov, previous_covariance):
+    time_lagged_covariance = (np.eye(2)- gamma *weighted_inv_true_cov) @ previous_covariance
+    return time_lagged_covariance
 
 def get_cond_cov_full(cov_past, cov_present, time_lagged_cov_present):
     conditional_covariance_full = cov_past - time_lagged_cov_present.T \
@@ -139,7 +153,6 @@ def get_phiid(time_series, time_lag, redundancy_func):
 
 def get_phiid_analytical(time_lagged_COV, time_lagged_COV_time_lag, time_lagged_COND_COV, mx, mx_time_lag, redundancy_func):
 
-    print('we got until a')
     # Matlab engine stuff 
     eng = matlab.engine.start_matlab()
     
@@ -155,7 +168,6 @@ def get_phiid_analytical(time_lagged_COV, time_lagged_COV_time_lag, time_lagged_
                         time_lagged_COV_time_lag), axis=1)
     full_time_lagged_COV = np.concatenate([a, b])
     
-    print('we got until b')
     
     # building array of means corresponding to full time-lagged covariance matrix
     all_means = np.concatenate((mx, mx_time_lag))
@@ -163,13 +175,9 @@ def get_phiid_analytical(time_lagged_COV, time_lagged_COV_time_lag, time_lagged_
     # convert to matlab-compatible data type *double*
     full_time_lagged_COV = matlab.double(full_time_lagged_COV.tolist())
     all_means = matlab.double(all_means.tolist())
-    
-    print('we got until c')
 
     phiid = eng.PhiIDFull_Analytical(full_time_lagged_COV, all_means, redundancy_func)
     # synergy = causal decoupling + downward causation + upward causation
-
-    print('we got until d')
     
     emergence_capacity_phiid = phiid['str'] + phiid['stx'] + \
         phiid['sty'] + phiid['sts']
@@ -180,8 +188,6 @@ def get_phiid_analytical(time_lagged_COV, time_lagged_COV_time_lag, time_lagged_
     transfer_phiid = phiid['xty'] + phiid['ytx']
     phi_phiid = - phiid['rtr'] + synergy_phiid + transfer_phiid
     phiR_phiid = phi_phiid + phiid['rtr']
-    
-    print('we got until e')
     
     return (phiid, emergence_capacity_phiid, downward_causation_phiid, synergy_phiid, 
             transfer_phiid, phi_phiid, phiR_phiid)
