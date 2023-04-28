@@ -35,6 +35,12 @@ function ret = get_phi_from_cov(cov_present, cov_past, cov_present_past)
 		end
 	end
 	
+	% exclude bipartition where one part is empty, if nvar = 2 
+	
+	if nvar == 2
+		bipartitions = bipartitions(1:end-1,:);
+	end
+	
 	% get phi for all bipartitions
 	for w = 1:length(bipartitions)
 		
@@ -92,12 +98,12 @@ function ret = get_phi_from_cov(cov_present, cov_past, cov_present_past)
 		phinorm = phi/Normalise;
 		
 		% record as Phi if minimum
-		Phi = phi;
-		Partition1 = part1;
-		Partition2 = part2;
-		
 		if phinorm < PhiNorm
 			PhiNorm = phinorm;
+			Phi = phi;
+			Partition1 = part1;
+			Partition2 = part2;
+		else Phi = PhiNorm;
 		end
 	end
 	

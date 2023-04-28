@@ -1,15 +1,21 @@
 function redred = DoubleRedundancyMMI_Analytical(varargin)
-%%DOUBLEREDUNDANCYMMI Compute the PhiID double-redundancy given 
+%%DOUBLEREDUNDANCYMMI_ANALYTICAL Compute the PhiID double-redundancy given 
 % a full time-lagged covariance matrix, assuming it follows a Gaussian 
 % distribution and using the MMI PID.
 %
 % NOTE: assumes JIDT has been already added to the javaclasspath.
 %
-%   R = DOUBLEREDUNDANCYMMI(full_time_lagged_cov, p1, p2), where
+%   R = DOUBLEREDUNDANCYMMI_ANALYTICAL(full_time_lagged_cov, p1, p2), where
 %   full_time_lagged_cov is a 2xD-by-2xD full time-lagged covariance matrix,  
 %   and p1 the row/column indices of the covariance of partition 1 at t, and
 %   p2 the row/column indices of the covariance of partition 2 at t. 
 %
+% Note: some function/variable names (private_FourVectorMMI(), private_TDMMI()) 
+% come from PhiIDFull_Continuous/Discrete where data is used as input, and 
+% quantities have been first calculated locally, and then on average -
+% this is not the case here, where, if using the full time-lagged covariance
+% matrix, we can only look at averages. Should be changed at some point.
+% 
 % Adapted from:
 %   Mediano*, Rosas*, Carhart-Harris, Seth and Barrett (2019). Beyond
 %   Integrated Information: A Taxonomy of Information Dynamics Phenomena.
@@ -77,17 +83,20 @@ function [ redred ] = private_FourVectorMMI(full_time_lagged_cov, p1, p2)
 	% Take double-redundancy as the minimum MI between either src or tgt
 	redred = 1;  % Set to a large, but finite value
 	
-	for i=1:length(src)
+	for i = 1:length(src)
 		
-		for j=1:length(tgt)
+		for j = 1:length(tgt)
 			
 			s = src{i};
 			t = tgt{j};
 			
 			% cond_cov_present_past = cov_past - (cov_present_past' / cov_present) * cov_present_past;
-			% 			    = full_time_lagged_cov(t1,t1) - (full_time_lagged_cov(p1,t1)' / full_time_lagged_cov(p1,p1)) * full_time_lagged_cov(p1,t1);
+			% = full_time_lagged_cov(t1,t1) - (full_time_lagged_cov(p1,t1)' / ...
+			% full_time_lagged_cov(p1,p1)) * full_time_lagged_cov(p1,t1);
 			
-			cond_cov = @(idx1, idx2) full_time_lagged_cov(idx2,idx2) - (full_time_lagged_cov(idx1,idx2)' / full_time_lagged_cov(idx1,idx1)) * full_time_lagged_cov(idx1,idx2);
+			cond_cov = @(idx1, idx2) full_time_lagged_cov(idx2,idx2) - ...
+				(full_time_lagged_cov(idx1,idx2)' / full_time_lagged_cov(idx1,idx1)) * ...
+				full_time_lagged_cov(idx1,idx2);
 			cond_cov_temp = cond_cov(s, t);
 			
 			cov = @(idx) full_time_lagged_cov(s, s);
