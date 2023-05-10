@@ -11,6 +11,7 @@ from itertools import product
 from matplotlib import pyplot as plt
 import os
 import pandas as pd
+import pickle
 # from joblib import Parallel, delayed
 # import scipy.io
 
@@ -48,15 +49,19 @@ path_out2 = '/media/nadinespy/NewVolume1/work/current_projects/viiit/viiit_with_
 # ADJUST PARAMETERS
 # ----------------------------------------------------------------
 
-all_rho = np.array([0.5])
+n_rho = 100
+n_weights = 11
+all_rho = np.arange(0, n_rho) / n_rho
+all_weights = np.linspace(0, 1, n_weights)
 all_errvar = np.array([0.01])
 all_timelags = np.array([1])
-all_weights = np.array([1])
+# all_rho = np.array([0.5])
+# all_weights = np.array([1])
+
 all_off_diag_covs = ([0])
 case = "discrete"
 gamma = 0.01
 dt = 0.01                                           # integration step
-T = 5
 # ----------------------------------------------------------------
 
 # initialize initial means and covariance
@@ -80,7 +85,7 @@ def get_results_from_model(rho, errvar, weight, time_lag, gamma):
     # ----------------------------------------------------------------
     # GET TRUE MEANS, AND TRUE (WEIGHTED) & MEAN-FIELD COVARIANCE
     # ----------------------------------------------------------------
-ex
+
     np.random.seed(10)
     true_means = np.random.randn(2)             # means of true distribution
 
@@ -105,15 +110,13 @@ ex
     # in the limit, variational and true means will be the same
     var_means = true_means
     identity = np.eye(2)
-    K = true_cov @ identity @ true_cov / gamma**2
+    K = np.linalg.inv(weighted_inv_true_cov @ identity @ weighted_inv_true_cov *
+                      errvar ** 2) / gamma ** 2
 
-    try:
-        same_time_COV =  all_errvar**2 * np.linalg.inv(K - (identity - gamma * weighted_inv_true_cov)
-                       @ K @ (identity-gamma*weighted_inv_true_cov))
-    except:
-        same_time_COV = all_errvar**2 * gamma * np.ones((2, 2))
+    same_time_COV = np.linalg.inv(K - (identity - gamma * weighted_inv_true_cov) @ K @
+                                  (identity - gamma * weighted_inv_true_cov))
 
-    time_lagged_COV = (identity-gamma * weighted_inv_true_cov) @ same_time_COV
+    time_lagged_COV = (identity - gamma * weighted_inv_true_cov) @ same_time_COV
 
     kl_div = iv.get_kl_div(weighted_inv_true_cov, mean_field_inv_true_cov,
                            true_means, var_means, same_time_COV)
@@ -172,10 +175,10 @@ ex
 
     phiR = phi + double_red
 
-    a = np.concatenate((time_lagged_COV,
-                        time_lagged_COND_COV), axis=1)
-    b = np.concatenate((time_lagged_COND_COV,
+    a = np.concatenate((same_time_COV,
                         time_lagged_COV), axis=1)
+    b = np.concatenate((time_lagged_COV,
+                        same_time_COV), axis=1)
     full_time_lagged_COV = np.concatenate([a, b])
 
     [phiid,
@@ -247,16 +250,15 @@ results_df = phi_in_variational_inference(all_rho, all_errvar, all_weights,
 
 results_df.to_pickle(path_out1 +
                      r'discrete_steady_state_df_' +
-                     str(all_rho[0]).replace('.', '') +
-                     '_' +
-                     str(all_errvar[0]).replace('.', '') +
-                     '_' + str(all_weights[0]).replace('.', '') +
-                     '_' + str(all_timelags[0]) +
-                     '_' + str(all_off_diag_covs[0]).replace('.', '') +
-                     '_' + str(gamma).replace('.', '') +
-                     '.pkl')
-results_df = open(path_out1+r'discrete_steady_state_df_00_001_00_1_0_001.pkl', 'rb')
-results_df = pickle.load(results_df)
+                     str(n_rho) + '_' +
+                     str(n_weights) + '_' +
+                     str(all_errvar[0]).replace('.', '') + '_' +
+                     str(all_timelags[0]) + '_' +
+                     str(all_off_diag_covs[0]).replace('.', '') + '_' +
+                     str(gamma).replace('.', '') + '.pkl')
+
+# results_df = open(path_out1+r'discrete_steady_state_df_00_001_00_1_0_001.pkl', 'rb')
+# results_df = pickle.load(results_df)
 
 
 # %% plotting
