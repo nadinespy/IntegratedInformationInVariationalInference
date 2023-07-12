@@ -1,0 +1,30 @@
+# IDEs
+.vscode/
+.idea/
+
+# Intermediate Coverage file
+.coverage
+
+# Output files
+*.png
+*.pkl
+
+# Python runtime
+*.pyc
+*.egg-info
+.pytest_cache
+
+# Virtual environments
+.venv/
+venv/
+
+# Other folder and files
+examples/
+_build/
+auto_examples/
+gen_api/
+*.py[co]
+*~
+*.DS_Store
+*.zip
+*.odt
